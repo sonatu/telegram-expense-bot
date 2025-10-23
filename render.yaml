@@ -1,10 +1,12 @@
 services:
   - type: web
-    name: expense-bot
+    name: telegram-expense-bot
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: python main.py
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
       - key: TOKEN
-        sync: false
+        sync: false  
