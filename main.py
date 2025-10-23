@@ -8,18 +8,21 @@ from aiohttp import web
 # ====== Переменные окружения ======
 TOKEN = os.getenv("TOKEN")
 PORT = int(os.getenv("PORT", 8000))
-WEBHOOK_PATH = "/webhook"
-WEBHOOK_URL = f"https://telegram-expense-bot-4yud.onrender.com{WEBHOOK_PATH}"
 
-# ====== Работа с данными ======
 DATA_FILE = "expenses.json"
 
+# ====== Загрузка сохранённых данных ======
 if os.path.exists(DATA_FILE):
     with open(DATA_FILE, "r", encoding="utf-8") as f:
         expenses = json.load(f)
 else:
     expenses = {}
 
+# ====== Инициализация бота ======
+bot = Bot(token=TOKEN)
+dp = Dispatcher()
+
+# ====== Вспомогательные функции ======
 def get_month_key():
     now = datetime.now()
     return f"{now.year}-{now.month:02d}"
@@ -50,10 +53,6 @@ def undo_last(chat_id):
     expenses[key] = chat_data
     save_data()
     return last, chat_data["total"]
-
-# ====== Инициализация бота и диспетчера ======
-bot = Bot(token=TOKEN)
-dp = Dispatcher()
 
 # ====== Хэндлеры ======
 @dp.message(Command("start"))
@@ -89,24 +88,13 @@ async def handle_expense(message: types.Message):
 async def handle(request: web.Request):
     body = await request.json()
     update = types.Update(**body)
-    await dp.feed_update(update)  # вместо process_update
+    await dp.feed_update(bot, update)  # ⚡ важно: передаём bot
     return web.Response(text="OK")
 
 app = web.Application()
-app.router.add_post(WEBHOOK_PATH, handle)
+app.router.add_post("/webhook", handle)
 
-# ====== Установка и удаление вебхука ======
-async def on_startup(app):
-    await bot.set_webhook(WEBHOOK_URL)
-
-async def on_shutdown(app):
-    await bot.delete_webhook()
-    await bot.session.close()
-
-app.on_startup.append(on_startup)
-app.on_shutdown.append(on_shutdown)
-
-# ====== Запуск ======
+# ====== Запуск приложения ======
 if __name__ == "__main__":
     print(f"Starting webhook on port {PORT}")
     web.run_app(app, port=PORT)
