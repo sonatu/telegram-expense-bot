@@ -5,9 +5,13 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiohttp import web
 
+# ====== Переменные окружения ======
 TOKEN = os.getenv("TOKEN")
 PORT = int(os.getenv("PORT", 8000))
+WEBHOOK_PATH = "/webhook"
+WEBHOOK_URL = f"https://telegram-expense-bot-4yud.onrender.com{WEBHOOK_PATH}"
 
+# ====== Работа с данными ======
 DATA_FILE = "expenses.json"
 
 if os.path.exists(DATA_FILE):
@@ -15,9 +19,6 @@ if os.path.exists(DATA_FILE):
         expenses = json.load(f)
 else:
     expenses = {}
-
-bot = Bot(token=TOKEN)
-dp = Dispatcher()
 
 def get_month_key():
     now = datetime.now()
@@ -50,6 +51,11 @@ def undo_last(chat_id):
     save_data()
     return last, chat_data["total"]
 
+# ====== Инициализация бота и диспетчера ======
+bot = Bot(token=TOKEN)
+dp = Dispatcher()
+
+# ====== Хэндлеры ======
 @dp.message(Command("start"))
 async def start(message: types.Message):
     await message.answer(
@@ -79,18 +85,28 @@ async def handle_expense(message: types.Message):
     except ValueError:
         await message.reply("Пожалуйста, отправь только число, например: 12.5")
 
-# -----------------------------
-# Webhook server
-# -----------------------------
+# ====== Вебхук сервер ======
 async def handle(request: web.Request):
     body = await request.json()
     update = types.Update(**body)
-    await dp.process_update(update)
+    await dp.feed_update(update)  # вместо process_update
     return web.Response(text="OK")
 
 app = web.Application()
-app.router.add_post("/webhook", handle)
+app.router.add_post(WEBHOOK_PATH, handle)
 
+# ====== Установка и удаление вебхука ======
+async def on_startup(app):
+    await bot.set_webhook(WEBHOOK_URL)
+
+async def on_shutdown(app):
+    await bot.delete_webhook()
+    await bot.session.close()
+
+app.on_startup.append(on_startup)
+app.on_shutdown.append(on_shutdown)
+
+# ====== Запуск ======
 if __name__ == "__main__":
     print(f"Starting webhook on port {PORT}")
     web.run_app(app, port=PORT)
