@@ -1,63 +1,78 @@
-using System.Text;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Hosting;
+using System;
+using System.IO;
+using System.Text.Json;
+using System.Threading.Tasks;
 using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
-using Telegram.Bot.Exceptions;
 
-var builder = WebApplication.CreateBuilder(args);
-
-// Получаем токен из переменной окружения
-var token = Environment.GetEnvironmentVariable("BOT_TOKEN");
-if (string.IsNullOrEmpty(token))
+class Program
 {
-    Console.WriteLine("❌ BOT_TOKEN not found in environment variables!");
-    return;
-}
+    static string DataFile = "expenses.json";
+    static JsonDocument Expenses;
+    static TelegramBotClient Bot;
 
-var bot = new TelegramBotClient(token);
-var app = builder.Build();
-
-app.MapPost("/webhook", async (HttpRequest request) =>
-{
-    using var reader = new StreamReader(request.Body, Encoding.UTF8);
-    var body = await reader.ReadToEndAsync();
-
-    var update = Newtonsoft.Json.JsonConvert.DeserializeObject<Update>(body);
-    if (update == null)
-        return Results.Ok();
-
-    try
+    static async Task Main()
     {
-        if (update.Type == UpdateType.Message && update.Message?.Text != null)
+        var token = Environment.GetEnvironmentVariable("TOKEN");
+        if (string.IsNullOrEmpty(token))
         {
-            var message = update.Message;
-
-            if (message.Text == "/start")
-            {
-                await bot.SendTextMessageAsync(
-                    chatId: message.Chat.Id,
-                    text: "Привет! Я бот учёта расходов 💰"
-                );
-            }
-            else
-            {
-                await bot.SendTextMessageAsync(
-                    chatId: message.Chat.Id,
-                    text: $"Ты сказал: {message.Text}"
-                );
-            }
+            Console.WriteLine("Ошибка: не задан TOKEN в переменных среды");
+            return;
         }
+
+        Bot = new TelegramBotClient(token);
+
+        // Загружаем данные
+        if (File.Exists(DataFile))
+        {
+            var json = await File.ReadAllTextAsync(DataFile);
+            Expenses = JsonDocument.Parse(json);
+        }
+
+        var me = await Bot.GetMeAsync();
+        Console.WriteLine($"Бот запущен: @{me.Username}");
+
+        Bot.StartReceiving(HandleUpdateAsync, HandleErrorAsync);
+
+        Console.WriteLine("Нажмите любую клавишу для выхода...");
+        Console.ReadKey();
     }
-    catch (ApiRequestException ex)
+
+    static async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, System.Threading.CancellationToken token)
     {
-        Console.WriteLine($"Telegram API Error: {ex.Message}");
+        if (update.Type != UpdateType.Message || update.Message!.Type != MessageType.Text)
+            return;
+
+        var chatId = update.Message.Chat.Id;
+        var text = update.Message.Text.Trim();
+
+        if (text == "/start")
+        {
+            await botClient.SendTextMessageAsync(chatId,
+                "Привет! 💰 Отправь сумму покупки, а я посчитаю, сколько вы потратили в этом месяце.\n" +
+                "Чтобы отменить последнюю запись, отправь /отмена или /undo");
+            return;
+        }
+
+        if (text == "/отмена" || text == "/undo")
+        {
+            await botClient.SendTextMessageAsync(chatId, "Функция отмены пока не реализована");
+            return;
+        }
+
+        if (decimal.TryParse(text.Replace(",", "."), out var amount))
+        {
+            await botClient.SendTextMessageAsync(chatId, $"Записано: {amount:F2} €");
+            return;
+        }
+
+        await botClient.SendTextMessageAsync(chatId, "Пожалуйста, отправь только число, например: 12.5");
     }
 
-    return Results.Ok();
-});
-
-app.MapGet("/", () => "✅ Telegram bot is running!");
-app.Run("http://0.0.0.0:" + (Environment.GetEnvironmentVariable("PORT") ?? "10000"));
+    static Task HandleErrorAsync(ITelegramBotClient botClient, Exception exception, System.Threading.CancellationToken token)
+    {
+        Console.WriteLine($"Ошибка: {exception.Message}");
+        return Task.CompletedTask;
+    }
+}
