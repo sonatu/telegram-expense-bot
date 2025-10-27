@@ -6,126 +6,101 @@ using System.Threading.Tasks;
 using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
-using Telegram.Bot.Exceptions;
 
 class Program
 {
-    static string TOKEN = Environment.GetEnvironmentVariable("TOKEN") ?? throw new Exception("TOKEN not set");
-    static string DATA_FILE = "expenses.json";
-    static TelegramBotClient Bot = new TelegramBotClient(TOKEN);
-    static Dictionary<string, ChatData> Expenses = new Dictionary<string, ChatData>();
-
     static async Task Main()
     {
-        LoadData();
+        string token = Environment.GetEnvironmentVariable("TOKEN") 
+                       ?? throw new Exception("TOKEN not set");
 
-        Bot.StartReceiving(UpdateHandler, ErrorHandler);
+        var bot = new TelegramBotClient(token);
+        Console.WriteLine("Bot started.");
 
-        Console.WriteLine("Bot started. Press any key to exit.");
-        Console.ReadKey();
+        var expenses = LoadExpenses();
 
-        SaveData();
-    }
-
-    static async Task UpdateHandler(ITelegramBotClient botClient, Update update, System.Threading.CancellationToken token)
-    {
-        if (update.Type != UpdateType.Message) return;
-        var message = update.Message;
-        if (message.Type != MessageType.Text) return;
-
-        if (message.Text.StartsWith("/start"))
-        {
-            await botClient.SendTextMessageAsync(message.Chat.Id,
-                "Привет! 💰 Отправь сумму покупки, а я посчитаю, сколько вы потратили в этом месяце.\n" +
-                "Чтобы отменить последнюю запись, отправь /undo");
-            return;
-        }
-
-        if (message.Text.StartsWith("/undo"))
-        {
-            var result = UndoLast(message.Chat.Id);
-            if (result == null)
+        bot.StartReceiving(
+            updateHandler: async (client, update, token1) =>
             {
-                await botClient.SendTextMessageAsync(message.Chat.Id, "Нет записей для отмены 😅");
-            }
-            else
+                if (update.Type != UpdateType.Message || update.Message?.Text == null)
+                    return;
+
+                var chatId = update.Message.Chat.Id;
+                var text = update.Message.Text.Trim();
+
+                if (text == "/start")
+                {
+                    await bot.SendTextMessageAsync(chatId, 
+                        "Привет! 💰 Отправь сумму покупки, а я посчитаю, сколько вы потратили в этом месяце.\n" +
+                        "Чтобы отменить последнюю запись, отправь /отмена или /undo");
+                    return;
+                }
+
+                if (text == "/отмена" || text == "/undo")
+                {
+                    if (!expenses.TryGetValue(chatId, out var items) || items.Count == 0)
+                    {
+                        await bot.SendTextMessageAsync(chatId, "Нет записей для отмены 😅");
+                        return;
+                    }
+
+                    var last = items[items.Count - 1];
+                    items.RemoveAt(items.Count - 1);
+                    SaveExpenses(expenses);
+
+                    var total = CalculateTotal(items);
+                    await bot.SendTextMessageAsync(chatId, $"Отменено: {last:F2} €. Теперь потрачено: {total:F2} €");
+                    return;
+                }
+
+                if (decimal.TryParse(text.Replace(',', '.'), out var amount))
+                {
+                    if (!expenses.ContainsKey(chatId))
+                        expenses[chatId] = new List<decimal>();
+
+                    expenses[chatId].Add(amount);
+                    SaveExpenses(expenses);
+
+                    var total = CalculateTotal(expenses[chatId]);
+                    await bot.SendTextMessageAsync(chatId, $"Потрачено: {total:F2} €");
+                }
+                else
+                {
+                    await bot.SendTextMessageAsync(chatId, "Пожалуйста, отправь только число, например: 12.5");
+                }
+            },
+            errorHandler: async (client, exception, token1) =>
             {
-                var (last, total) = result.Value;
-                var monthName = DateTime.Now.ToString("MMMM");
-                await botClient.SendTextMessageAsync(message.Chat.Id,
-                    $"Отменено: {last:F2} €. Теперь потрачено за {monthName}: {total:F2} €");
+                Console.WriteLine(exception.Message);
+                await Task.CompletedTask;
             }
-            return;
-        }
+        );
 
-        if (double.TryParse(message.Text.Replace(",", "."), out double amount))
-        {
-            double total = AddExpense(amount, message.Chat.Id);
-            var monthName = DateTime.Now.ToString("MMMM");
-            await botClient.SendTextMessageAsync(message.Chat.Id,
-                $"Потрачено за {monthName}: {total:F2} €");
-        }
-        else
-        {
-            await botClient.SendTextMessageAsync(message.Chat.Id, "Пожалуйста, отправь только число, например: 12.5");
-        }
+        // Ждем бесконечно, чтобы бот продолжал работать
+        await Task.Delay(-1);
     }
 
-    static Task ErrorHandler(ITelegramBotClient botClient, Exception exception, System.Threading.CancellationToken token)
+    static Dictionary<long, List<decimal>> LoadExpenses()
     {
-        Console.WriteLine(exception);
-        return Task.CompletedTask;
+        if (!File.Exists("expenses.json"))
+            return new Dictionary<long, List<decimal>>();
+
+        var json = File.ReadAllText("expenses.json");
+        return JsonSerializer.Deserialize<Dictionary<long, List<decimal>>>(json) 
+               ?? new Dictionary<long, List<decimal>>();
     }
 
-    static void LoadData()
+    static void SaveExpenses(Dictionary<long, List<decimal>> expenses)
     {
-        if (System.IO.File.Exists(DATA_FILE))
-        {
-            var json = System.IO.File.ReadAllText(DATA_FILE);
-            Expenses = JsonSerializer.Deserialize<Dictionary<string, ChatData>>(json) ?? new Dictionary<string, ChatData>();
-        }
+        var json = JsonSerializer.Serialize(expenses, new JsonSerializerOptions { WriteIndented = true });
+        File.WriteAllText("expenses.json", json);
     }
 
-    static void SaveData()
+    static decimal CalculateTotal(List<decimal> items)
     {
-        var json = JsonSerializer.Serialize(Expenses, new JsonSerializerOptions { WriteIndented = true });
-        System.IO.File.WriteAllText(DATA_FILE, json);
-    }
-
-    static string GetMonthKey() => DateTime.Now.ToString("yyyy-MM");
-
-    static string GetChatKey(long chatId) => $"{GetMonthKey()}_{chatId}";
-
-    static double AddExpense(double amount, long chatId)
-    {
-        var key = GetChatKey(chatId);
-        if (!Expenses.ContainsKey(key))
-            Expenses[key] = new ChatData();
-
-        Expenses[key].Items.Add(amount);
-        Expenses[key].Total += amount;
-        Expenses[key].Total = Math.Round(Expenses[key].Total, 2);
-
-        SaveData();
-        return Expenses[key].Total;
-    }
-
-    static (double last, double total)? UndoLast(long chatId)
-    {
-        var key = GetChatKey(chatId);
-        if (!Expenses.ContainsKey(key) || Expenses[key].Items.Count == 0) return null;
-
-        var last = Expenses[key].Items[^1];
-        Expenses[key].Items.RemoveAt(Expenses[key].Items.Count - 1);
-        Expenses[key].Total = Math.Round(Expenses[key].Total - last, 2);
-
-        SaveData();
-        return (last, Expenses[key].Total);
-    }
-
-    class ChatData
-    {
-        public List<double> Items { get; set; } = new List<double>();
-        public double Total { get; set; } = 0;
+        decimal total = 0;
+        foreach (var item in items)
+            total += item;
+        return total;
     }
 }
