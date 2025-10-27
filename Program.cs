@@ -6,6 +6,7 @@ using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using System.Text.Json;
+using IOFile = System.IO.File;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers().AddNewtonsoftJson();
@@ -29,8 +30,8 @@ app.MapPost("/webhook", async (Update update, TelegramBotClient bot) =>
         {
             string file = "expenses.json";
             Dictionary<string, double> data = new();
-            if (File.Exists(file))
-                data = JsonSerializer.Deserialize<Dictionary<string, double>>(File.ReadAllText(file)) ?? new();
+            if (IOFile.Exists(file))
+                data = JsonSerializer.Deserialize<Dictionary<string, double>>(IOFile.ReadAllText(file)) ?? new();
 
             string monthKey = DateTime.Now.ToString("yyyy-MM");
             data[monthKey] = data.GetValueOrDefault(monthKey, 0) + amount;
