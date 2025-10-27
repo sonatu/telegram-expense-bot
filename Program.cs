@@ -105,10 +105,10 @@ class Program
 
     static Dictionary<long, List<decimal>> LoadExpenses()
     {
-        if (!File.Exists("expenses.json"))
+        if (!System.IO.File.Exists("expenses.json"))
             return new Dictionary<long, List<decimal>>();
 
-        var json = File.ReadAllText("expenses.json");
+        var json = System.IO.File.ReadAllText("expenses.json");
         return JsonSerializer.Deserialize<Dictionary<long, List<decimal>>>(json)
                ?? new Dictionary<long, List<decimal>>();
     }
@@ -116,7 +116,7 @@ class Program
     static void SaveExpenses(Dictionary<long, List<decimal>> expenses)
     {
         var json = JsonSerializer.Serialize(expenses, new JsonSerializerOptions { WriteIndented = true });
-        File.WriteAllText("expenses.json", json);
+        System.IO.File.WriteAllText("expenses.json", json);
     }
 
     static decimal CalculateTotal(List<decimal> items)
