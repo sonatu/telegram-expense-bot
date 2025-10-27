@@ -10,32 +10,22 @@ using Telegram.Bot.Polling;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using Microsoft.AspNetCore.Builder;
-using Microsoft.Extensions.Hosting;
+using Microsoft.AspNetCore.Hosting;
 
 class Program
 {
     static async Task Main()
     {
-        // Получаем порт из переменной среды Render
-        var port = Environment.GetEnvironmentVariable("PORT") ?? "5000";
-
-        var builder = WebApplication.CreateBuilder();
-        builder.WebHost.UseUrls($"http://*:{port}");
-        var app = builder.Build();
-
-        // Минимальный эндпоинт
-        app.MapGet("/", () => "Bot is running!");
-
-        var token = Environment.GetEnvironmentVariable("TOKEN")
-                    ?? throw new Exception("TOKEN not set");
+        string token = Environment.GetEnvironmentVariable("TOKEN")
+                       ?? throw new Exception("TOKEN not set");
 
         var bot = new TelegramBotClient(token);
         Console.WriteLine("Bot started.");
 
         var expenses = LoadExpenses();
-
         var cts = new CancellationTokenSource();
 
+        // Настройка опций получения обновлений
         var receiverOptions = new ReceiverOptions
         {
             AllowedUpdates = Array.Empty<UpdateType>()
@@ -48,12 +38,17 @@ class Program
             cts.Token
         );
 
-        // Запускаем веб-сервер параллельно с ботом
-        await app.StartAsync();
+        // Получаем порт из переменной окружения Render
+        var port = Environment.GetEnvironmentVariable("PORT") ?? "5000";
 
-        Console.WriteLine($"Listening on port {port}...");
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseUrls($"http://*:{port}");
+        var app = builder.Build();
 
-        await Task.Delay(-1); // чтобы процесс не завершался
+        // Простая проверка здоровья
+        app.MapGet("/", () => "Bot is running!");
+
+        await app.RunAsync(); // Это держит приложение живым
 
         async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken token)
         {
