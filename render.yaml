@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: telegram-expense-bot
+    env: docker
+    plan: free
+    envVars:
+      - key: TOKEN
+        sync: false
+    autoDeploy: true
